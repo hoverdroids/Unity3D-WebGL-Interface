@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 using UnityEngine;
   
 public class WebGLCanvasInterface : MonoBehaviour{
-    //REQUIRED CALL from c# else unity strips it and no other functions will work
-    //NOTE you must call the following at least once so the other js functions can call them, else Unity strips the functions and the js functions can't use them
 
+#if UNITY_WEBGL
+  
     /*----------------------------------------    General Use    -------------------------------------------------------*/
     [DllImport("__Internal")]
     private static extern void consoleLogThis();
@@ -23,6 +23,12 @@ public class WebGLCanvasInterface : MonoBehaviour{
 
     [DllImport("__Internal")]
     private static extern string stringToBuffer(string str, bool returnBuffer);
+
+    [DllImport("__Internal")]
+    private static extern string getPageUrl(bool debug, bool returnBuffer, string gameInstanceName, bool doSerialize, bool onlyReturnData);
+    
+    [DllImport("__Internal")]
+    private static extern bool isMobile(bool debug);
 
     /*----------------------------------------    gameInstance    -------------------------------------------------------*/
     [DllImport("__Internal")]
@@ -82,15 +88,7 @@ public class WebGLCanvasInterface : MonoBehaviour{
     private static extern void getWebGLCanvasParentNode(bool debug, string gameInstanceName, bool onlyReturnData);
 
     [DllImport("__Internal")]
-    private static extern void consoleLogWebGLCanvasParentNode(string gameInstanceName, bool onlyReturnData);
-
-
-   /*    
-    [DllImport("__Internal")]
-    private static extern string serializeCanvasAttr(bool debug, bool returnBuffer, string gameInstanceName, string optName, string attrName, bool doSerialize);
-
-  */
-  
+    private static extern void consoleLogWebGLCanvasParentNode(string gameInstanceName, bool onlyReturnData);  
 
     [DllImport("__Internal")]
     private static extern string getWebGLCanvasAccessKey(bool debug, bool returnBuffer, string gameInstanceName, bool doSerialize, bool onlyReturnData);
@@ -197,73 +195,96 @@ public class WebGLCanvasInterface : MonoBehaviour{
     private bool printMethodsOnUpdate = false;
 
     void Start(){         
-       printAllMethods();
+        initializeJSLIB();  
+        allMethods();
     }
 
     // Update is called once per frame
     void Update(){
         if(printMethodsOnUpdate){
-            printAllMethods();
+            allMethods();
         }
     }
 
     public void togglePrintMethodsOnUpdate(){
         printMethodsOnUpdate = !printMethodsOnUpdate;
     }
+    private void initializeJSLIB(){
+        /* When jslib methods are called from c# or other jslib methods, the methdos must be imported in c# if low-stripping is enabled and then executed if
+           high-stripping is enabled. If not, Unity will strip them and any dependent functions in the jslib will throw "function not found" exceptions.
+           As long as this methods is called in Start, you won't have to worry about required functions gettings stripped as they are listed and handled below.
 
-    public void printAllMethods(){
-        //The WebGLCanvasInterface.jslib functions can reference the current WebGL game instance or call the functions of any other WebGL game
-        //instance that is a child to the window object. Pass the empty string "" to reference this instance or the global variable name of another instance.
-        //EX:   Pass "gameInstance" for the standard unity webgl template
-        //      var gameInstance = UnityLoader.instantiate(...)
-        string gameInstanceName = "gameInstance";
+           Also, while you can call these functions on any gameInstance object, you should initialize the following functions for all gameInstance objects so that
+           they are always accessible regardless of what is calling them
+        */
+        getGameInstance(false, "", true);//Returned JS OBJECT returns empty string to C#
+        getGameInstanceModule(false, "", true);//Returned JS OBJECT returns empty string to C#
+        getGameInstanceModuleAsmLibArg(false, "", true);//Returned JS OBJECT returns empty string to C#
+        getGLctx(false, "", true);//Returned JS OBJECT returns empty string to C#
+        getOptObj(false, "", "", false, true);//Returned JS OBJECT returns empty string to C#
+        getCanvas(false, "", true);//Returned JS OBJECT returns empty string to C#
+        getWebGLCanvasParentElement(false, "", true);//Returned JS OBJECT returns empty string to C#
+        getWebGLCanvasParentNode(false, "", true);//Returned JS OBJECT returns empty string to C#
+        stringToBuffer("", true);
+        serializeOpt(false, true, "", "drawingBufferHeight", false, false, true);//Use drawingBufferHeight to initialize the function to avoid a big delay due to attempting to serialize a large object - the canvas object
+        serializeCanvasOpt(false, true, "", "baseURI", false, true);//Use baseURI to initialize the function to avoid a big delay due to attempting to serialize a large object - the canvas object
+    }
 
-        //NOTE: if you know that you are only calling local js function - ie not that of other gameInstances - then there is no need to
-        //first call the "required" functions as they'll be called naturally when/if they're used. Note that this also means other gameInstance
-        //objects cannot call those functions on this gameInstance as the functions will be stripped out when not used
+    private void allMethods(){
+        /*  The name of the JS variable used when instantiating the gameInstance. All of the functions work with any number of WebGL instances on the page, so
+            long as you use unique variable names for each gameInstance (e.g. gameInstance1 and gameInstance2). If only one instance is used on the page, use the
+            "" empty string for gameInstanceName and the functions will assume gameInstanceName = "gameInstance" like in all Unity examples.
+            
+            EX: Pass "gameInstance" for the standard unity webgl template
+                var gameInstance = UnityLoader.instantiate(...)
+        */
+        string gameInstanceName = "gameInstance"; 
 
-        //TODO the following function MUST be called at least once since they are dependencies for other functions. If you don't call them then they
-        //will be stripped when building with high strip settings.
-        //The console log methods are only useful during development as they output to the browser console
-        //You MUST actually call this function when max stripping; if lite stripping, then just list above
-        
-        //It is really not advisable to serialize the entire game instance object, canvas, or GLctx objects as it adds a huge delay. But, the functions
-        //below must get called or they will be stripped by unity. So, we call them with optNames that we know will minimize the affects on loading time
-        getGameInstance(false, gameInstanceName, true);//This will not return an object that is useful to C#, only to js.
-        getGameInstanceModule(false, gameInstanceName, true);
-        getGameInstanceModuleAsmLibArg(false, gameInstanceName, true);
-        getGLctx(false, gameInstanceName, true);
-        getOptObj(false, gameInstanceName, "drawingBufferHeight", false, true);
-        stringToBuffer("Str Cannot Be empty!", true);//TODO check if this ca be emtpy
-        serializeOpt(false, true, gameInstanceName, "drawingBufferHeight", false, false, true);
-        
-        /* The following are the primary objects that are exposed through this library */
-        consoleLogThis();
+        consoleLogImportantJSObjects(gameInstanceName);  
+        gameInstanceMethods(gameInstanceName);
+        glctxMethods(gameInstanceName);
+        canvasMethods(gameInstanceName);
+        canvasContainerMethods(gameInstanceName);
+        otherUsefulMethods(gameInstanceName);
+    }
+
+    private void consoleLogImportantJSObjects(string gameInstanceName){
+        /*  The following show useful objects in the browser console for debugging:
+            -gameInstance                       : The entire gameInstance object for the object with the corresponding JS var name
+            -gameInstance.Module                : The gameInstance Module, which contains useful info like the asmLibraryArg, SendMessage function, TOTAL_MEMORY, and a lot more         
+            -gameInstance.Module.asmLibraryArg  : Contains the functions from all .JSLIBs and a lot more
+            -GLctx                              : The WebGL context object. It contains everything needed to interact with the WebGL, its canvas, and the canvas's container
+            These are not required, just useful during development.
+        */
+        consoleLogThis();//This ends up being the entire window object
         consoleLogGameInstance(gameInstanceName, true);
         consoleLogGameInstanceModule(gameInstanceName, true);
         consoleLogGameInstanceModuleAsmLibArg(gameInstanceName, true);
         consoleLogGLctx(gameInstanceName, true);
+    }
 
-        /* GLctx Options
-           Honestly, the most relevant options for this object are drawingBufferHeight, drawingBufferWidth, and canvas. Most likely you'll only ever
-           use Canvas options. But, this was here for completeness and in case other useful info is added to the WebGL context in the future.
+    private void gameInstanceMethods(string gameInstanceName){
+        /* Methods for accessing top-level gameInstace objects and functions. The gameInstance object has more references but honestly, the most relevant option
+           in this object is gameInstanceUrl. Most likely you'll only ever use Canvas options - in that case, look into
+           the canvas functions. This is here for completeness just in case other useful info is added in the future.
         */
-        serializeGLctxOpt(false, true, gameInstanceName, "drawingBufferHeight", false, true);//Your only need to call this if you need to call one of the two functions below
-        Debug.Log("C# GLctx DrawingBufferHeight:" + getWebGLGLctxDrawingBufferHeight(false, true, gameInstanceName, false, true));//TODO not working
-        Debug.Log("C# GLctx DrawingBufferWidth:" + getWebGLGLctxDrawingBufferWidth(false, true, gameInstanceName, false, true));//TODO not working
+        serializeGameInstanceOpt(false, true, gameInstanceName, "url", false, true);//You only need to call this if call one of the two functions below or create a functions that depends on it. The url option is here to prevent attempting to serialize the whole massive gameInstance object
+        Debug.Log("C# GameInstanceUrl:" + getGameInstanceUrl(false, true, gameInstanceName, false, true));
+    }
 
-        /* GameInstance Options */
-        serializeGameInstanceOpt(false, true, gameInstanceName, "url", false, true);//The url option is here to prevent attempting to serialize the whole massive gameInstance object
-        Debug.Log("C# GameInstanceUrl:" + getGameInstanceUrl(false, true, gameInstanceName, false, true));//TODO not working
-        
-        /*Canvas Options */
-        serializeCanvasOpt(false, true, gameInstanceName, "baseURI", false, true);
-        getCanvas(false, gameInstanceName, true);
+    private void glctxMethods(string gameInstanceName){
+        /* Methods for accessing top-level GLctx objects and functions. The GLctx object has more references but honestly, the most relevant options
+           in this object are drawingBufferHeight, drawingBufferWidth, and canvas. Most likely you'll only ever use Canvas options - in that case, look into
+           the canvas functions. This is here for completeness just in case other useful info is added in the future.
+        */
+        serializeGLctxOpt(false, true, gameInstanceName, "drawingBufferHeight", false, true);//You only need to call this if call one of the two functions below or create a functions that depends on it
+        Debug.Log("C# GLctx DrawingBufferHeight:" + getWebGLGLctxDrawingBufferHeight(false, true, gameInstanceName, false, true));
+        Debug.Log("C# GLctx DrawingBufferWidth:" + getWebGLGLctxDrawingBufferWidth(false, true, gameInstanceName, false, true));
+    }
+
+    private void canvasMethods(string gameInstanceName){
+        /* Useful methods for accessing canvas information */
         consoleLogCanvas(gameInstanceName, true);
-        getWebGLCanvasParentElement(false, gameInstanceName, true);
-        consoleLogWebGLCanvasParentElement(gameInstanceName, true);
-        getWebGLCanvasParentNode(false, gameInstanceName, true);
-        consoleLogWebGLCanvasParentNode(gameInstanceName, true);
         Debug.Log("C# Canvas AccessKey:" + getWebGLCanvasAccessKey(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas AssignedSlot:" + getWebGLCanvasAssignedSlot(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas AttributesStyleMap:" + getWebGLCanvasAttributeStyleMap(false, true, gameInstanceName, true, true));
@@ -292,13 +313,25 @@ public class WebGLCanvasInterface : MonoBehaviour{
         Debug.Log("C# Canvas Width:" + getWebGLCanvasWidth(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas WidthNative:" + getWebGLCanvasWidthNative(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas Title:" + getWebGLCanvasTitle(false, true, gameInstanceName, false, true));
-     
+    }
+
+    private void canvasContainerMethods(string gameInstanceName){
+        /* Useful methods for accessing canvas container information */     
+        consoleLogWebGLCanvasParentElement(gameInstanceName, true);
+        consoleLogWebGLCanvasParentNode(gameInstanceName, true);
+        
         /* Canvas Parent Attributes */ 
-        Debug.Log("C# Canvas ParentAttr-Style...test:" + getWebGLCanvasParentAttr(false, true, gameInstanceName, "id", false, true));
+        Debug.Log("C# Canvas ParentAttr-id:" + getWebGLCanvasParentAttr(false, true, gameInstanceName, "id", false, true));//Use id to initialize the function to avoid a big delay due to attempting to serialize a large object - the canvas parent object
         Debug.Log("C# Canvas ParentID:" + getWebGLCanvasParentId(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas ParentName:" + getWebGLCanvasParentName(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas ParentClass:" + getWebGLCanvasParentClass(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas ParentStyle:" + getWebGLCanvasParentStyle(false, true, gameInstanceName, false, true));
         Debug.Log("C# Canvas ParentTitle:" + getWebGLCanvasParentTitle(false, true, gameInstanceName, false, true));
     }
+
+    private void otherUsefulMethods(string gameInstanceName){
+        Debug.Log("C# PageUrl:" + getPageUrl(true, true, gameInstanceName, false, true));
+        Debug.Log("C# IsMobile:" + isMobile(true));
+    }
+#endif
 }
